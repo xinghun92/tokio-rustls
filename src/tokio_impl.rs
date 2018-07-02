@@ -1,9 +1,11 @@
-extern crate tokio;
+extern crate tokio_io;
+extern crate tokio_proto;
+extern crate tokio_core;
+extern crate futures;
 
 use super::*;
-use self::tokio::prelude::*;
-use self::tokio::io::{ AsyncRead, AsyncWrite };
-use self::tokio::prelude::Poll;
+use self::tokio_io::{AsyncRead, AsyncWrite};
+use self::futures::{Future, Poll, Async};
 
 
 impl<S: AsyncRead + AsyncWrite> Future for ConnectAsync<S> {
@@ -33,14 +35,17 @@ impl<S, C> Future for MidHandshake<S, C>
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let stream = self.inner.as_mut().unwrap();
-            if !stream.session.is_handshaking() { break };
+            if !stream.session.is_handshaking() { debug!("not handshake"); break };
 
             let (io, session) = stream.get_mut();
 
             match session.complete_io(io) {
                 Ok(_) => (),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(Async::NotReady),
-                Err(e) => return Err(e)
+                Err(e) => {
+                    debug!("complete io failed: {:?}", e);
+                    return Err(e)
+                }
             }
         }
 
@@ -68,7 +73,10 @@ impl<S, C> AsyncWrite for TlsStream<S, C>
         match self.session.complete_io(&mut self.io) {
             Ok(_) => (),
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(Async::NotReady),
-            Err(e) => return Err(e)
+            Err(e) => {
+                debug!("stream complete io failed: {:?}", e);
+                return Err(e)
+            }
         }
 
         self.io.shutdown()
